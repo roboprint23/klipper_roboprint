@@ -7,12 +7,12 @@ import math, logging
 import stepper, mathutil
 
 # Slow moves once the ratio of tower to XY movement exceeds SLOW_RATIO
-SLOW_RATIO = 4.
+SLOW_RATIO = 3.
 
 class DeltaKinematics:
     def __init__(self, toolhead, config):
         # Setup tower rails
-        stepper_configs = [config.getsection('stepper_' + a) for a in 'abcd']
+        stepper_configs = [config.getsection('stepper_' + a) for a in 'abc']
         rail_a = stepper.LookupMultiRail(
             stepper_configs[0], need_position_minmax = False)
         a_endstop = rail_a.get_homing_info().position_endstop
@@ -22,10 +22,7 @@ class DeltaKinematics:
         rail_c = stepper.LookupMultiRail(
             stepper_configs[2], need_position_minmax = False,
             default_position_endstop=a_endstop)
-        rail_d = stepper.LookupMultiRail(
-            stepper_configs[3], need_position_minmax = False,
-            default_position_endstop=a_endstop)
-        self.rails = [rail_a, rail_b, rail_c, rail_d]
+        self.rails = [rail_a, rail_b, rail_c]
         config.get_printer().register_event_handler("stepper_enable:motor_off",
                                                     self._motor_off)
         # Setup max velocity
@@ -49,8 +46,10 @@ class DeltaKinematics:
         # Determine tower locations in cartesian space
         self.angles = [sconfig.getfloat('angle', angle)
                        for sconfig, angle in zip(stepper_configs,
-                                                 [210., 240., 30., 60.])]
-        self.towers = [(181.8653347947321, 105.00000000000003), (-105.0000000000001, -181.86533479473206), (-181.86533479473212, 104.99999999999999), (105.00000000000003, -181.8653347947321)]
+                                                 [210., 330., 90.])]
+        self.towers = [(math.cos(math.radians(angle)) * radius,
+                        math.sin(math.radians(angle)) * radius)
+                       for angle in self.angles]
         for r, a, t in zip(self.rails, self.arm2, self.towers):
             r.setup_itersolve('delta_stepper_alloc', a, t[0], t[1])
         for s in self.get_steppers():
@@ -96,7 +95,7 @@ class DeltaKinematics:
         return [s for rail in self.rails for s in rail.get_steppers()]
     def _actuator_to_cartesian(self, spos):
         sphere_coords = [(t[0], t[1], sp) for t, sp in zip(self.towers, spos)]
-        return mathutil.trilateration(sphere_coords[:3], self.arm2)
+        return mathutil.trilateration(sphere_coords, self.arm2)
     def calc_position(self, stepper_positions):
         spos = [stepper_positions[rail.get_name()] for rail in self.rails]
         return self._actuator_to_cartesian(spos)
@@ -107,11 +106,11 @@ class DeltaKinematics:
         if tuple(homing_axes) == (0, 1, 2):
             self.need_home = False
     def home(self, homing_state):
+        # All axes are homed simultaneously
         homing_state.set_axes([0, 1, 2])
         forcepos = list(self.home_position)
         forcepos[2] = -1.5 * math.sqrt(max(self.arm2)-self.max_xy2)
         homing_state.home_rails(self.rails, forcepos, self.home_position)
-        homing_state.set_homed_position([0., 0., 0.])
     def _motor_off(self, print_time):
         self.limit_xy2 = -1.
         self.need_home = True
@@ -186,11 +185,11 @@ class DeltaCalibration:
     def coordinate_descent_params(self, is_extended):
         # Determine adjustment parameters (for use with coordinate_descent)
         adj_params = ('radius', 'angle_a', 'angle_b',
-                      'endstop_a', 'endstop_b', 'endstop_c','endstop_d')
+                      'endstop_a', 'endstop_b', 'endstop_c')
         if is_extended:
-            adj_params += ('arm_a', 'arm_b', 'arm_c', 'arm_d')
+            adj_params += ('arm_a', 'arm_b', 'arm_c')
         params = { 'radius': self.radius }
-        for i, axis in enumerate('abcd'):
+        for i, axis in enumerate('abc'):
             params['angle_'+axis] = self.angles[i]
             params['arm_'+axis] = self.arms[i]
             params['endstop_'+axis] = self.endstops[i]
@@ -199,10 +198,10 @@ class DeltaCalibration:
     def new_calibration(self, params):
         # Create a new calibration object from coordinate_descent params
         radius = params['radius']
-        angles = [params['angle_'+a] for a in 'abcd']
-        arms = [params['arm_'+a] for a in 'abcd']
-        endstops = [params['endstop_'+a] for a in 'abcd']
-        stepdists = [params['stepdist_'+a] for a in 'abcd']
+        angles = [params['angle_'+a] for a in 'abc']
+        arms = [params['arm_'+a] for a in 'abc']
+        endstops = [params['endstop_'+a] for a in 'abc']
+        stepdists = [params['stepdist_'+a] for a in 'abc']
         return DeltaCalibration(radius, angles, arms, endstops, stepdists)
     def get_position_from_stable(self, stable_position):
         # Return cartesian coordinates for the given stable_position
@@ -210,7 +209,7 @@ class DeltaCalibration:
             (t[0], t[1], es - sp * sd)
             for sd, t, es, sp in zip(self.stepdists, self.towers,
                                      self.abs_endstops, stable_position) ]
-        return mathutil.trilateration(sphere_coords[:3], [a**2 for a in self.arms])
+        return mathutil.trilateration(sphere_coords, [a**2 for a in self.arms])
     def calc_stable_position(self, coord):
         # Return a stable_position from a cartesian coordinate
         steppos = [
@@ -233,12 +232,10 @@ class DeltaCalibration:
             "stepper_a: position_endstop: %.6f angle: %.6f arm_length: %.6f\n"
             "stepper_b: position_endstop: %.6f angle: %.6f arm_length: %.6f\n"
             "stepper_c: position_endstop: %.6f angle: %.6f arm_length: %.6f\n"
-            "stepper_c: position_endstop: %.6f angle: %.6f arm_length: %.6f\n"
             "delta_radius: %.6f"
             % (self.endstops[0], self.angles[0], self.arms[0],
                self.endstops[1], self.angles[1], self.arms[1],
                self.endstops[2], self.angles[2], self.arms[2],
-               self.endstops[3], self.angles[3], self.arms[3],
                self.radius))
 
 def load_kinematics(toolhead, config):

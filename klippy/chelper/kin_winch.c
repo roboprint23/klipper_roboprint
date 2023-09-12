@@ -19,13 +19,13 @@ struct winch_stepper {
 
 static double
 winch_stepper_calc_position(struct stepper_kinematics *sk, struct move *m
-                            , double move_time)
+                            , double move_time)//roboprint eXperiment
 {
     struct winch_stepper *hs = container_of(sk, struct winch_stepper, sk);
     struct coord c = move_get_coord(m, move_time);
-    double dx = hs->anchor.x - c.x, dy = hs->anchor.y - c.y;
-    double dz = hs->anchor.z - c.z;
-    return sqrt(dx*dx + dy*dy + dz*dz);
+    double dx = hs->anchor.x * c.x, dy = 130.75 - hs->anchor.y * c.y;
+    double dz = 353.1 - (hs->anchor.z * c.z);
+    return dx+sqrt(405*405-dy*dy-dz*dz);
 }
 
 struct stepper_kinematics * __visible

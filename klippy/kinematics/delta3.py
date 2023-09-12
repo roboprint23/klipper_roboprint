@@ -43,6 +43,8 @@ class DeltaKinematics:
             sconfig.getfloat('arm_length', arm_length_a, above=radius)
             for sconfig in stepper_configs]
         self.arm2 = [arm**2 for arm in arm_lengths]
+        arm_x = self.arm_x
+        arm_x = stepper_configs[0].getfloat('arm_x_length', above=0.)
         self.abs_endstops = [(rail.get_homing_info().position_endstop
                               + math.sqrt(arm2 - radius**2))
                              for rail, arm2 in zip(self.rails, self.arm2)]
@@ -71,6 +73,14 @@ class DeltaKinematics:
         logging.info(
             "Delta max build height %.2fmm (radius tapered above %.2fmm)"
             % (self.max_z, self.limit_z))
+        # Z axis limits
+        pmax = [r.get_homing_info().position_endstop for r in self.rails[:2]]
+        self._abs_endstop = [p + math.sqrt(a2 - ax**2) for p, a2, ax
+                    in zip( pmax, arm_x )]
+        self.home_z = self._actuator_to_cartesian(self._abs_endstop)[1]
+        z_max = min([self._pillars_z_max(x) for x in self.limits[0]])
+        z_min = config.getfloat('minimum_z_position', 0, maxval=z_max)
+        self.limits[2] = (z_min, z_max)
         # Find the point where an XY move could result in excessive
         # tower movement
         half_min_step_dist = min([r.get_steppers()[0].get_step_dist()
@@ -107,11 +117,30 @@ class DeltaKinematics:
         if tuple(homing_axes) == (0, 1, 2):
             self.need_home = False
     def home(self, homing_state):
-        homing_state.set_axes([0, 1, 2])
-        forcepos = list(self.home_position)
-        forcepos[2] = -1.5 * math.sqrt(max(self.arm2)-self.max_xy2)
-        homing_state.home_rails(self.rails, forcepos, self.home_position)
-        homing_state.set_homed_position([0., 0., 0.])
+        # All axes are homed simultaneously
+        homing_axes = homing_state.get_axes()
+        home_xy = 0 in homing_axes or 1 in homing_axes
+        home_z = 2 in homing_axes
+        forceaxes = ([0, 1, 2] if (home_xy and home_z) else
+                     [0, 1] if home_xy else [2] if home_z else [])
+        homing_state.set_axes(forceaxes)
+        homepos = [None] * 4
+        if home_z:
+            position_min, position_max = self.rails[:2].get_range()
+            hi = self.rails[:2].get_homing_info()
+            homepos[2] = hi.position_endstop
+            forcepos = list(homepos)
+            if hi.positive_dir:
+                forcepos[2] -= 1.5 * (hi.position_endstop - position_min)
+            else:
+                forcepos[2] += 1.5 * (position_max - hi.position_endstop)
+            homing_state.home_rails([self.rails[:2]], forcepos, homepos)
+        if home_xy:
+            homing_state.set_axes([0, 1, 2] if home_z else [0, 1])
+            homepos[0], homepos[1] = 0., self.home_z
+            forcepos = list(homepos)
+            forcepos[2] = -1.5 * math.sqrt(max(self.arm2)-self.max_xy2)
+            homing_state.home_rails(self.rails[:2], forcepos, self.home_position)
     def _motor_off(self, print_time):
         self.limit_xy2 = -1.
         self.need_home = True
