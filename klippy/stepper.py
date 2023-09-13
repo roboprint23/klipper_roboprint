@@ -139,11 +139,22 @@ class MCU_stepper:
         ffi_main, ffi_lib = chelper.get_ffi()
         return ffi_lib.itersolve_get_commanded_pos(self._stepper_kinematics)
     def get_mcu_position(self):
-        mcu_pos_dist = self.get_commanded_position() + self._mcu_position_offset
+        mcu_pos_dist = self.get_commanded_position() + self._mcu_position_offset 
         mcu_pos = mcu_pos_dist / self._step_dist
-        if mcu_pos >= 0.:
+        if not math.isnan(mcu_pos):  
+            if mcu_pos >= 0.:
+                return int(mcu_pos + 0.5)
+            return int(mcu_pos - 0.5)
+        else:
+            return 0
+        """try:
+            int(mcu_pos)
+        except:
+            msg =f'This is error {self._mcu_position_offset} {self.get_commanded_position()}'
+            raise UserWarning(msg)"""
+        """if mcu_pos >= 0.:
             return int(mcu_pos + 0.5)
-        return int(mcu_pos - 0.5)
+        return int(mcu_pos - 0.5)"""
     def _set_mcu_position(self, mcu_pos):
         mcu_pos_dist = mcu_pos * self._step_dist
         self._mcu_position_offset = mcu_pos_dist - self.get_commanded_position()

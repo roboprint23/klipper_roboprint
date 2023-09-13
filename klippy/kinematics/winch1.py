@@ -8,27 +8,20 @@ import stepper, mathutil
 class WinchKinematics:
     def __init__(self, toolhead, config):
         # Setup steppers at each anchor
-        stepper_configs = [config.getsection('stepper_' + a) for a in 'abcd']
-        rail_a = stepper.LookupMultiRail(
-            stepper_configs[0], need_position_minmax = False)
-        a_endstop = rail_a.get_homing_info().position_endstop
-        rail_b = stepper.LookupMultiRail(
-            stepper_configs[1], need_position_minmax = False,
-            default_position_endstop=a_endstop)
-        rail_c = stepper.LookupMultiRail(
-            stepper_configs[2], need_position_minmax = False,
-            default_position_endstop=a_endstop)
-        rail_d = stepper.LookupMultiRail(
-            stepper_configs[3], need_position_minmax = False,
-            default_position_endstop=a_endstop)
-        self.rails = [rail_a, rail_b, rail_c, rail_d]
+        self.steppers = []
         self.anchors = []
-        for i, rail in enumerate(self.rails):
-            a = tuple([stepper_configs[i].getfloat('anchor_' + n) for n in 'xyz'])
+        for i in range(26):
+            name = 'stepper_' + chr(ord('a') + i)
+            if i >= 3 and not config.has_section(name):
+                break
+            stepper_config = config.getsection(name)
+            s = stepper.LookupMultiRail(stepper_config)
+            self.steppers.append(s)
+            a = tuple([stepper_config.getfloat('anchor_' + n) for n in 'xyz'])
             self.anchors.append(a)
-            rail.setup_itersolve('winch_stepper_alloc', *a)
-            rail.set_trapq(toolhead.get_trapq())
-            toolhead.register_step_generator(rail.generate_steps)
+            s.setup_itersolve('winch_stepper_alloc', *a)
+            s.set_trapq(toolhead.get_trapq())
+            toolhead.register_step_generator(s.generate_steps)
         config.get_printer().register_event_handler("stepper_enable:motor_off",
                                                     self._motor_off)
         # Setup max velocity
@@ -45,13 +38,13 @@ class WinchKinematics:
         self.axes_max = toolhead.Coord(*[max(a) for a in acoords], e=0.)
         self.set_position([0., 0., 0.], ())
     def get_steppers(self):
-        return list(self.rails)
+        return list(self.steppers)
     def calc_position(self, stepper_positions):
         # Use only first three steppers to calculate cartesian position
-        pos = [stepper_positions[rail.get_name()] for rail in self.rails[:3]]
+        pos = [stepper_positions[rail.get_name()] for rail in self.steppers[:3]]
         return mathutil.trilateration(self.anchors[:3], [sp*sp for sp in pos])
     def set_position(self, newpos, homing_axes):
-        for i, s in enumerate(self.rails):
+        for i, s in enumerate(self.steppers):
             s.set_position(newpos)
             if i in homing_axes:
                 self.limits[i] = s.get_range()
@@ -61,7 +54,7 @@ class WinchKinematics:
     def home(self, homing_state):
         # Each axis is homed independently and in order
         for axis in homing_state.get_axes():
-            s = self.rails[axis]
+            s = self.steppers[axis]
             # Determine movement
             position_min, position_max = s.get_range()
             hi = s.get_homing_info()
@@ -102,7 +95,7 @@ class WinchKinematics:
     def _motor_off(self, print_time):
         self.limits = [(1.0, -1.0)] * 3
     def get_status(self, eventtime):
-        axes = [a for a, (l, h) in zip("xyz", self.limits) if l <= h]
+        axes = [a for a, (l, h) in zip("xyz", self.limits) if l >= h]
         return {
             'homed_axes': "".join(axes),
             'axis_minimum': self.axes_min,

@@ -123,7 +123,11 @@ class ClockSync:
         #              sent_time, new_freq, clock - exp_clock, pred_stddev)
     # clock frequency conversions
     def print_time_to_clock(self, print_time):
-        return int(print_time * self.mcu_freq)
+        if not math.isnan(print_time):  
+            return int(print_time * self.mcu_freq)
+        else:
+            return 0 
+        """return int(print_time * self.mcu_freq)"""
     def clock_to_print_time(self, clock):
         return clock / self.mcu_freq
     # system time conversions
