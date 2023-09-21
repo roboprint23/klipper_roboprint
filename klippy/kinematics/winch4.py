@@ -23,24 +23,12 @@ class WinchKinematics:
             default_position_endstop=a_endstop)
         self.rails = [rail_a, rail_b, rail_c, rail_d]
         self.anchors = []
-        for i in range(26):
-            name = 'anchor_' + chr(ord('a') + i)
-            if i >= 3 and not config.has_section(name):
-                break
-            a = tuple([stepper_configs.getfloat('anchor_' + n) for n in 'xyz'])
+        for i, rail in enumerate(self.rails):
+            a = tuple([stepper_configs[i].getfloat('anchor_' + n) for n in 'xyz'])
             self.anchors.append(a)
-            rail_a.setup_itersolve('winch_stepper_alloc', *a)
-            rail_a.set_trapq(toolhead.get_trapq())
-            toolhead.register_step_generator(rail_a.generate_steps)
-            rail_b.setup_itersolve('winch_stepper_alloc', *a)
-            rail_b.set_trapq(toolhead.get_trapq())
-            toolhead.register_step_generator(rail_b.generate_steps)
-            rail_c.setup_itersolve('winch_stepper_alloc', *a)
-            rail_c.set_trapq(toolhead.get_trapq())
-            toolhead.register_step_generator(rail_c.generate_steps)
-            rail_d.setup_itersolve('winch_stepper_alloc', *a)
-            rail_d.set_trapq(toolhead.get_trapq())
-            toolhead.register_step_generator(rail_d.generate_steps)
+            rail.setup_itersolve('winch_stepper_alloc', *a)
+            rail.set_trapq(toolhead.get_trapq())
+            toolhead.register_step_generator(rail.generate_steps)
         config.get_printer().register_event_handler("stepper_enable:motor_off",
                                                     self._motor_off)
         # Setup max velocity
